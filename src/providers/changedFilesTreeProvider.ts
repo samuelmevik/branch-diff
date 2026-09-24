@@ -15,7 +15,7 @@ export class SummaryItem extends vscode.TreeItem {
     public readonly totalDeletions: number
   ) {
     super(
-      `${currentBranch} ⟵ ${baseBranch}`,
+      `${baseBranch} ⟵ ${currentBranch}`,
       vscode.TreeItemCollapsibleState.None
     );
 
@@ -241,6 +241,10 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
       return;
     }
 
+    if (this.isLoading) {
+      return;
+    }
+
     this.isLoading = true;
     try {
       this.changedFiles = await GitService.getDiffFiles(
@@ -269,7 +273,7 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
     }
 
     const modeTag = this.diffMode === 'mergeBase' ? 'PR' : 'Direct';
-    this.treeView.description = `${this.currentBranch} ⟵ ${this.baseBranch} [${modeTag}]`;
+    this.treeView.description = `${this.baseBranch} ⟵ ${this.currentBranch} [${modeTag}]`;
     this.treeView.badge = filesCount > 0 ? { value: filesCount, tooltip: `${filesCount} changed files` } : undefined;
   }
 

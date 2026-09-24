@@ -1,10 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { ChangedFileItem } from '../providers/changedFilesTreeProvider';
 import { BranchContentProvider } from '../providers/branchContentProvider';
-import { GitService } from '../git/gitService';
-import { ChangedFilesTreeProvider } from '../providers/changedFilesTreeProvider';
+import { ChangedFileItem, ChangedFilesTreeProvider } from '../providers/changedFilesTreeProvider';
 
 export async function openDiff(
   item: ChangedFileItem | vscode.Uri | undefined,

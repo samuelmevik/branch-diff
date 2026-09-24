@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { BRANCH_DIFF_SCHEME, BranchContentProvider } from './providers/branchContentProvider';
 import { ChangedFilesTreeProvider } from './providers/changedFilesTreeProvider';
 import { selectBaseBranch } from './commands/selectBranch';
