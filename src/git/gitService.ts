@@ -1,5 +1,6 @@
 import * as cp from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BranchInfo, DiffMode, DiffStatus, FileDiff } from './types';
 
 export class GitService {
@@ -287,6 +288,68 @@ export class GitService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Reverts all changes to a file so that it matches the comparison ref.
+   */
+  public static async revertFile(
+    repoRoot: string,
+    comparisonRef: string,
+    fileDiff: FileDiff
+  ): Promise<void> {
+    const { relPath, oldRelPath, status } = fileDiff;
+    const fullPath = path.join(repoRoot, relPath);
+
+    switch (status) {
+      case 'A':
+      case '?':
+      case 'C': {
+        // File was added, untracked, or copied: remove it from git index and working tree
+        try {
+          await this.exec(['rm', '-f', '--', relPath], repoRoot);
+        } catch {
+          // If untracked, git rm fails; proceed to remove from filesystem
+        }
+
+        if (fs.existsSync(fullPath)) {
+          const stat = await fs.promises.stat(fullPath);
+          if (stat.isDirectory()) {
+            await fs.promises.rm(fullPath, { recursive: true, force: true });
+          } else {
+            await fs.promises.unlink(fullPath);
+          }
+        }
+        break;
+      }
+
+      case 'R': {
+        // File was renamed: restore old path from comparisonRef, remove renamed path
+        if (oldRelPath) {
+          await this.exec(['checkout', comparisonRef, '--', oldRelPath], repoRoot);
+        }
+
+        try {
+          await this.exec(['rm', '-f', '--', relPath], repoRoot);
+        } catch {
+          // Ignore if git rm fails
+        }
+
+        if (fs.existsSync(fullPath)) {
+          await fs.promises.unlink(fullPath).catch(() => { });
+        }
+        break;
+      }
+
+      case 'D':
+      case 'M':
+      case 'U':
+      default: {
+        // File was modified, deleted, or unmerged: restore it from comparisonRef
+        await this.exec(['checkout', comparisonRef, '--', relPath], repoRoot);
+        break;
+      }
     }
   }
 }

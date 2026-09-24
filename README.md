@@ -24,6 +24,7 @@ A VS Code extension that brings the GitHub Pull Request review experience direct
     - `[R]` Renamed
   - Additions and deletions breakdown (`+15, -4`).
   - Toggle between **Directory Tree** view and **Flat File List**.
+  - **Revert Changes to File**: Inline discard button (`$(discard)`) and context menu action to quickly restore any file back to its base state.
 - 🔀 **Pull Request Mode (Three-dot Merge-base)**:
   - By default, compares changes made since diverging from the base branch (`git diff <base>...HEAD`), exactly like GitHub PRs.
   - One-click toggle to **Direct Diff** (`git diff <base>..HEAD`) if you prefer comparing directly against the base branch tip.
@@ -52,6 +53,7 @@ A VS Code extension that brings the GitHub Pull Request review experience direct
 | `branchDiff.toggleDiffMode`   | Toggle Diff Mode              | Toggles between PR Mode (`merge-base`) and Direct Diff |
 | `branchDiff.openDiff`         | Open Diff                     | Opens side-by-side editable diff editor                |
 | `branchDiff.openFile`         | Open Working File             | Opens the regular working file directly                |
+| `branchDiff.revertFile`       | Revert Changes to File        | Discards all changes to a file and restores base state |
 
 ---
 

@@ -3,6 +3,7 @@ import { BRANCH_DIFF_SCHEME, BranchContentProvider } from './providers/branchCon
 import { ChangedFilesTreeProvider } from './providers/changedFilesTreeProvider';
 import { selectBaseBranch } from './commands/selectBranch';
 import { openDiff, openWorkingFile } from './commands/openDiff';
+import { revertFileChanges } from './commands/revertFile';
 
 export async function activate(context: vscode.ExtensionContext) {
   // 1. Register virtual document provider for base branch file snapshots
@@ -52,6 +53,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('branchDiff.openFile', async (item) => {
       await openWorkingFile(item, treeProvider);
+    }),
+
+    vscode.commands.registerCommand('branchDiff.revertFile', async (item) => {
+      await revertFileChanges(item, treeProvider);
     })
   );
 

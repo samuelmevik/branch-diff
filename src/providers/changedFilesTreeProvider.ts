@@ -175,6 +175,30 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
     this._onDidChangeTreeData.fire();
   }
 
+  public getChangedFiles(): FileDiff[] {
+    return this.changedFiles;
+  }
+
+  public getFileDiff(relPath: string): FileDiff | undefined {
+    const norm = relPath.replace(/\\/g, '/');
+    return this.changedFiles.find(
+      (f) => f.relPath === norm || (f.oldRelPath && f.oldRelPath === norm)
+    );
+  }
+
+  public async getComparisonRef(): Promise<string> {
+    if (!this.repoRoot || !this.baseBranch) {
+      return '';
+    }
+    if (this.diffMode === 'mergeBase') {
+      const mergeBase = await GitService.getMergeBase(this.repoRoot, this.baseBranch, 'HEAD');
+      if (mergeBase) {
+        return mergeBase;
+      }
+    }
+    return this.baseBranch;
+  }
+
   public async initialize(): Promise<void> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
