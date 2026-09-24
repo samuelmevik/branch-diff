@@ -1,6 +1,12 @@
 # Branch Diff & PR Review (VS Code Extension)
 
+[![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/samuelmevik/branch-diff)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A VS Code extension that brings the GitHub Pull Request review experience directly into your editor—with the ability to compare your current working branch against any branch (local or remote) and **edit your code directly within the diff view**.
+
+🔗 **GitHub Repository**: [https://github.com/samuelmevik/branch-diff](https://github.com/samuelmevik/branch-diff)  
+🐛 **Report Issues**: [https://github.com/samuelmevik/branch-diff/issues](https://github.com/samuelmevik/branch-diff/issues)
 
 ---
 

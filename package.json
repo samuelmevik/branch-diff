@@ -5,6 +5,11 @@
   "version": "0.1.0",
   "publisher": "Stenen",
   "license": "MIT",
+  "icon": "icon.png",
+  "homepage": "https://github.com/samuelmevik/branch-diff#readme",
+  "bugs": {
+    "url": "https://github.com/samuelmevik/branch-diff/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/samuelmevik/branch-diff.git"
@@ -33,7 +38,7 @@
         {
           "id": "branch-diff-container",
           "title": "Branch Diff",
-          "icon": "$(git-pull-request)"
+          "icon": "resources/sidebar-icon.svg"
         }
       ]
     },
