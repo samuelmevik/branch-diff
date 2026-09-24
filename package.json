@@ -1,0 +1,157 @@
+{
+  "name": "branch-diff-review",
+  "displayName": "Branch Diff & PR Review",
+  "description": "Compare your current working branch against any branch (like a GitHub PR) with a changed files view and an editable diff editor.",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "diff",
+    "pull request",
+    "review",
+    "branch comparison"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "branch-diff-container",
+          "title": "Branch Diff",
+          "icon": "$(git-pull-request)"
+        }
+      ]
+    },
+    "views": {
+      "branch-diff-container": [
+        {
+          "id": "branchDiff.changedFilesView",
+          "name": "Changed Files",
+          "type": "tree"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "branchDiff.selectBaseBranch",
+        "title": "Branch Diff: Select Base Branch to Compare...",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "branchDiff.refresh",
+        "title": "Branch Diff: Refresh Changes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "branchDiff.toggleDiffMode",
+        "title": "Branch Diff: Toggle Diff Mode (PR vs Direct)",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "branchDiff.toggleViewMode",
+        "title": "Branch Diff: Toggle Tree/Flat View",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "branchDiff.openDiff",
+        "title": "Branch Diff: Open Diff"
+      },
+      {
+        "command": "branchDiff.openFile",
+        "title": "Branch Diff: Open Working File",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "branchDiff.switchBranches",
+        "title": "Branch Diff: Swap Head and Base Branches",
+        "icon": "$(arrow-swap)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "branchDiff.selectBaseBranch",
+          "when": "view == branchDiff.changedFilesView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "branchDiff.toggleViewMode",
+          "when": "view == branchDiff.changedFilesView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "branchDiff.toggleDiffMode",
+          "when": "view == branchDiff.changedFilesView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "branchDiff.refresh",
+          "when": "view == branchDiff.changedFilesView",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "branchDiff.openFile",
+          "when": "view == branchDiff.changedFilesView && viewItem == file",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Branch Diff & PR Review",
+      "properties": {
+        "branchDiff.defaultBaseBranch": {
+          "type": "string",
+          "default": "",
+          "description": "Default base branch to compare against (leave empty to auto-detect main/master)."
+        },
+        "branchDiff.diffMode": {
+          "type": "string",
+          "enum": [
+            "mergeBase",
+            "direct"
+          ],
+          "default": "mergeBase",
+          "enumDescriptions": [
+            "PR Mode: Compares changes made since diverging from base branch (merge-base...HEAD)",
+            "Direct Diff: Compares working tree directly against base branch tip (base..HEAD)"
+          ],
+          "description": "Comparison mode for computing file diffs."
+        },
+        "branchDiff.viewMode": {
+          "type": "string",
+          "enum": [
+            "tree",
+            "flat"
+          ],
+          "default": "tree",
+          "description": "Display changed files as a directory tree or a flat list."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "node esbuild.js",
+    "watch-esbuild": "node esbuild.js --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  }
+}
