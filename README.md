@@ -2,8 +2,6 @@
 
 A VS Code extension that brings the GitHub Pull Request review experience directly into your editor—with the ability to compare your current working branch against any branch (local or remote) and **edit your code directly within the diff view**.
 
-![Branch Diff Demo](https://raw.githubusercontent.com/microsoft/vscode-icons/master/icons/dark/git-pull-request.svg)
-
 ---
 
 ## Features

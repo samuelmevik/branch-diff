@@ -3,7 +3,7 @@
   "displayName": "Branch Diff & PR Review",
   "description": "Compare your current working branch against any branch (like a GitHub PR) with a changed files view and an editable diff editor.",
   "version": "0.1.0",
-  "publisher": "local-dev",
+  "publisher": "Stenen",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -151,6 +151,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.3.3"
   }
