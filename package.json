@@ -4,6 +4,11 @@
   "description": "Compare your current working branch against any branch (like a GitHub PR) with a changed files view and an editable diff editor.",
   "version": "0.1.0",
   "publisher": "Stenen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samuelmevik/branch-diff.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -146,7 +151,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "build": "node esbuild.js",
-    "watch-esbuild": "node esbuild.js --watch"
+    "watch-esbuild": "node esbuild.js --watch",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
