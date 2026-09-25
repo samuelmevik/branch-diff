@@ -100,22 +100,52 @@
           "group": "navigation@1"
         },
         {
-          "command": "branchDiff.toggleViewMode",
+          "command": "branchDiff.switchBranches",
           "when": "view == branchDiff.changedFilesView",
           "group": "navigation@2"
         },
         {
-          "command": "branchDiff.toggleDiffMode",
+          "command": "branchDiff.toggleViewMode",
           "when": "view == branchDiff.changedFilesView",
           "group": "navigation@3"
         },
         {
-          "command": "branchDiff.refresh",
+          "command": "branchDiff.toggleDiffMode",
           "when": "view == branchDiff.changedFilesView",
           "group": "navigation@4"
+        },
+        {
+          "command": "branchDiff.refresh",
+          "when": "view == branchDiff.changedFilesView",
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [
+        {
+          "command": "branchDiff.selectBaseBranch",
+          "when": "view == branchDiff.changedFilesView && viewItem == repository",
+          "group": "inline@1"
+        },
+        {
+          "command": "branchDiff.switchBranches",
+          "when": "view == branchDiff.changedFilesView && viewItem == repository",
+          "group": "inline@2"
+        },
+        {
+          "command": "branchDiff.refresh",
+          "when": "view == branchDiff.changedFilesView && viewItem == repository",
+          "group": "inline@3"
+        },
+        {
+          "command": "branchDiff.switchBranches",
+          "when": "view == branchDiff.changedFilesView && viewItem == summary",
+          "group": "1_branch@1"
+        },
+        {
+          "command": "branchDiff.selectBaseBranch",
+          "when": "view == branchDiff.changedFilesView && viewItem == summary",
+          "group": "1_branch@2"
+        },
         {
           "command": "branchDiff.openFile",
           "when": "view == branchDiff.changedFilesView && viewItem == file",
@@ -186,7 +216,7 @@
     "publish": "vsce publish"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^20.19.43",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.20.0",

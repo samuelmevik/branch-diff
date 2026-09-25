@@ -8,30 +8,35 @@ export async function openDiff(
   item: ChangedFileItem | vscode.Uri | undefined,
   treeProvider: ChangedFilesTreeProvider
 ): Promise<void> {
-  const repoRoot = treeProvider.getRepoRoot();
-  const baseBranch = treeProvider.getBaseBranch();
+  let repoRoot: string | undefined;
+  let baseBranch: string | undefined;
+  let relPath: string | undefined;
+  let status: string = 'M';
+
+  if (item instanceof ChangedFileItem) {
+    repoRoot = item.repoRoot;
+    baseBranch = item.baseBranch;
+    relPath = item.fileDiff.relPath;
+    status = item.fileDiff.status;
+  } else {
+    const targetUri = item instanceof vscode.Uri ? item : vscode.window.activeTextEditor?.document.uri;
+    if (!targetUri) {
+      vscode.window.showInformationMessage('No active file to compare.');
+      return;
+    }
+    const repo = treeProvider.getRepoForPath(targetUri.fsPath);
+    if (!repo) {
+      vscode.window.showWarningMessage('File does not belong to any detected Git repository.');
+      return;
+    }
+    repoRoot = repo.repoRoot;
+    baseBranch = repo.baseBranch;
+    relPath = path.relative(repoRoot, targetUri.fsPath).replace(/\\/g, '/');
+  }
 
   if (!repoRoot || !baseBranch) {
     vscode.window.showWarningMessage('Please select a base branch first.');
     return;
-  }
-
-  let relPath: string;
-  let status: string = 'M';
-
-  if (item instanceof ChangedFileItem) {
-    relPath = item.fileDiff.relPath;
-    status = item.fileDiff.status;
-  } else if (item instanceof vscode.Uri) {
-    relPath = path.relative(repoRoot, item.fsPath).replace(/\\/g, '/');
-  } else {
-    // If called from palette without arguments, check active editor
-    const activeEditor = vscode.window.activeTextEditor;
-    if (!activeEditor) {
-      vscode.window.showInformationMessage('No active file to compare.');
-      return;
-    }
-    relPath = path.relative(repoRoot, activeEditor.document.uri.fsPath).replace(/\\/g, '/');
   }
 
   const filename = path.posix.basename(relPath);
@@ -42,14 +47,9 @@ export async function openDiff(
   const leftUri = BranchContentProvider.encodeUri(repoRoot, baseBranch, relPath);
 
   // Right URI: if file exists locally, use real file URI so user can edit directly in diff editor!
-  let rightUri: vscode.Uri;
-  if (status === 'D' || !localExists) {
-    // File was deleted in working tree; show empty on right
-    rightUri = BranchContentProvider.encodeUri(repoRoot, 'empty', relPath);
-  } else {
-    // Real file on disk: FULLY EDITABLE in VS Code Diff Editor!
-    rightUri = localFileUri;
-  }
+  const rightUri = (status === 'D' || !localExists)
+    ? BranchContentProvider.encodeUri(repoRoot, 'empty', relPath)
+    : localFileUri;
 
   const title = `${filename} (${baseBranch} ⟷ Working Tree)`;
 
@@ -61,12 +61,11 @@ export async function openDiff(
 
 export async function openWorkingFile(
   item: ChangedFileItem | undefined,
-  treeProvider: ChangedFilesTreeProvider
+  _treeProvider: ChangedFilesTreeProvider
 ): Promise<void> {
-  const repoRoot = treeProvider.getRepoRoot();
-  if (!repoRoot || !item) return;
+  if (!item) return;
 
-  const localFileUri = vscode.Uri.file(path.join(repoRoot, item.fileDiff.relPath));
+  const localFileUri = vscode.Uri.file(path.join(item.repoRoot, item.fileDiff.relPath));
   if (fs.existsSync(localFileUri.fsPath)) {
     await vscode.window.showTextDocument(localFileUri);
   } else {

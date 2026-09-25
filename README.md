@@ -28,8 +28,13 @@ A VS Code extension that brings the GitHub Pull Request review experience direct
 - 🔀 **Pull Request Mode (Three-dot Merge-base)**:
   - By default, compares changes made since diverging from the base branch (`git diff <base>...HEAD`), exactly like GitHub PRs.
   - One-click toggle to **Direct Diff** (`git diff <base>..HEAD`) if you prefer comparing directly against the base branch tip.
+- 📦 **Nested & Multi-Repository Support**:
+  - Automatically discovers all Git repositories in your workspace, including nested repositories, submodules, and multi-root workspaces.
+  - When multiple repositories exist, they appear as collapsible sections in the sidebar with per-repository base branch selection, stats, and inline controls.
+  - Single-repository workspaces seamlessly retain the clean, single-tree view.
 - ⚡ **Auto-refresh**:
   - Changes update automatically whenever you save edits in the diff editor or switch branches in git.
+  - Changes update automatically whenever you save edits in the diff editor or switch branches in git across any repository.
 
 ---
 
@@ -48,6 +53,7 @@ A VS Code extension that brings the GitHub Pull Request review experience direct
 | Command                       | Title                         | Action                                                 |
 | ----------------------------- | ----------------------------- | ------------------------------------------------------ |
 | `branchDiff.selectBaseBranch` | Select Base Branch to Compare | Choose target/base branch via QuickPick                |
+| `branchDiff.switchBranches`   | Swap Head and Base Branches   | Checks out base branch and swaps comparison roles      |
 | `branchDiff.refresh`          | Refresh Changes               | Re-scans git diff and reloads changed files            |
 | `branchDiff.toggleViewMode`   | Toggle Tree/Flat View         | Switches between directory hierarchy and flat list     |
 | `branchDiff.toggleDiffMode`   | Toggle Diff Mode              | Toggles between PR Mode (`merge-base`) and Direct Diff |

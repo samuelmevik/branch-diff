@@ -1,9 +1,24 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { DiffMode, DiffStatus, FileDiff, ViewMode } from '../git/types';
+import { DiffMode, DiffStatus, FileDiff, RepoState, ViewMode } from '../git/types';
 import { GitService } from '../git/gitService';
 
-export type TreeElement = SummaryItem | MessageItem | DirectoryItem | ChangedFileItem;
+export type TreeElement = RepositoryTreeItem | SummaryItem | MessageItem | DirectoryItem | ChangedFileItem;
+
+export class RepositoryTreeItem extends vscode.TreeItem {
+  constructor(public readonly repoState: RepoState) {
+    super(repoState.displayName, vscode.TreeItemCollapsibleState.Expanded);
+    this.contextValue = 'repository';
+    this.iconPath = new vscode.ThemeIcon('repo');
+    const ins = repoState.changedFiles.reduce((acc, f) => acc + f.insertions, 0);
+    const del = repoState.changedFiles.reduce((acc, f) => acc + f.deletions, 0);
+    const base = repoState.baseBranch || '(no base)';
+    const modeTag = repoState.diffMode === 'mergeBase' ? 'PR' : 'Direct';
+
+    this.description = `${base} ⟵ ${repoState.currentBranch} (${repoState.changedFiles.length} files: +${ins}, -${del})`;
+    this.tooltip = `Repository: ${repoState.displayName}\nPath: ${repoState.repoRoot}\nComparison: ${repoState.currentBranch} against ${base}\nMode: ${modeTag}\nTotal: ${repoState.changedFiles.length} files (+${ins}, -${del})`;
+  }
+}
 
 export class SummaryItem extends vscode.TreeItem {
   constructor(
@@ -12,7 +27,8 @@ export class SummaryItem extends vscode.TreeItem {
     public readonly mode: DiffMode,
     public readonly filesCount: number,
     public readonly totalInsertions: number,
-    public readonly totalDeletions: number
+    public readonly totalDeletions: number,
+    public readonly repoRoot?: string
   ) {
     super(
       `${baseBranch} ⟵ ${currentBranch}`,
@@ -27,19 +43,27 @@ export class SummaryItem extends vscode.TreeItem {
 
     this.command = {
       command: 'branchDiff.selectBaseBranch',
-      title: 'Change Base Branch'
+      title: 'Change Base Branch',
+      arguments: [this]
     };
   }
 }
 
 export class MessageItem extends vscode.TreeItem {
-  constructor(message: string, commandId?: string, commandTitle?: string, iconId: string = 'info') {
+  constructor(
+    message: string,
+    commandId?: string,
+    commandTitle?: string,
+    iconId: string = 'info',
+    commandArgs?: any[]
+  ) {
     super(message, vscode.TreeItemCollapsibleState.None);
     this.iconPath = new vscode.ThemeIcon(iconId);
     if (commandId) {
       this.command = {
         command: commandId,
-        title: commandTitle || message
+        title: commandTitle || message,
+        arguments: commandArgs
       };
     }
   }
@@ -120,19 +144,15 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
   private _onDidChangeTreeData = new vscode.EventEmitter<TreeElement | undefined | null | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private repoRoot: string | null = null;
-  private currentBranch: string = '';
-  private baseBranch: string = '';
-  private diffMode: DiffMode = 'mergeBase';
+  private repos: Map<string, RepoState> = new Map();
+  private defaultDiffMode: DiffMode = 'mergeBase';
   private viewMode: ViewMode = 'tree';
-  private changedFiles: FileDiff[] = [];
-  private isLoading: boolean = false;
-
+  private isInitializing: boolean = false;
   private treeView?: vscode.TreeView<TreeElement>;
 
   constructor() {
     const config = vscode.workspace.getConfiguration('branchDiff');
-    this.diffMode = (config.get<string>('diffMode') as DiffMode) || 'mergeBase';
+    this.defaultDiffMode = (config.get<string>('diffMode') as DiffMode) || 'mergeBase';
     this.viewMode = (config.get<string>('viewMode') as ViewMode) || 'tree';
   }
 
@@ -140,34 +160,109 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
     this.treeView = treeView;
   }
 
+  public getPrimaryRepo(): RepoState | undefined {
+    const first = this.repos.values().next();
+    return first.done ? undefined : first.value;
+  }
+
   public getRepoRoot(): string | null {
-    return this.repoRoot;
+    return this.getPrimaryRepo()?.repoRoot || null;
   }
 
-  public getCurrentBranch(): string {
-    return this.currentBranch;
+  public getRepoRoots(): string[] {
+    return Array.from(this.repos.keys());
   }
 
-  public getBaseBranch(): string {
-    return this.baseBranch;
+  public getRepos(): RepoState[] {
+    return Array.from(this.repos.values());
   }
 
-  public getDiffMode(): DiffMode {
-    return this.diffMode;
+  public getRepo(repoRoot: string): RepoState | undefined {
+    return this.repos.get(GitService.normalizePath(repoRoot));
+  }
+
+  public getRepoForPath(filePath: string): RepoState | undefined {
+    const normPath = GitService.normalizePath(filePath).toLowerCase();
+    let bestMatch: RepoState | undefined;
+    let bestLen = -1;
+
+    for (const repo of this.repos.values()) {
+      const repoNorm = repo.repoRoot.toLowerCase();
+      if (
+        normPath === repoNorm ||
+        normPath.startsWith(repoNorm + path.sep.toLowerCase()) ||
+        normPath.startsWith(repoNorm + '/')
+      ) {
+        if (repoNorm.length > bestLen) {
+          bestLen = repoNorm.length;
+          bestMatch = repo;
+        }
+      }
+    }
+
+    return bestMatch || this.getPrimaryRepo();
+  }
+
+  public resolveRepoRoot(target?: any): string | undefined {
+    const unwrapped = Array.isArray(target) ? target[0] : target;
+    if (typeof unwrapped === 'string') return unwrapped;
+    if (unwrapped instanceof RepositoryTreeItem) return unwrapped.repoState.repoRoot;
+    if (unwrapped instanceof SummaryItem && unwrapped.repoRoot) return unwrapped.repoRoot;
+    if (unwrapped instanceof ChangedFileItem) return unwrapped.repoRoot;
+    if (unwrapped?.repoState?.repoRoot) return unwrapped.repoState.repoRoot;
+    if (unwrapped?.repoRoot) return unwrapped.repoRoot;
+    if (unwrapped instanceof vscode.Uri) return this.getRepoForPath(unwrapped.fsPath)?.repoRoot;
+    return undefined;
+  }
+
+  public getCurrentBranch(repoRoot?: string): string {
+    if (repoRoot) {
+      return this.getRepo(repoRoot)?.currentBranch || '';
+    }
+    return this.getPrimaryRepo()?.currentBranch || '';
+  }
+
+  public getBaseBranch(repoRoot?: string): string {
+    if (repoRoot) {
+      return this.getRepo(repoRoot)?.baseBranch || '';
+    }
+    return this.getPrimaryRepo()?.baseBranch || '';
+  }
+
+  public getDiffMode(repoRoot?: string): DiffMode {
+    if (repoRoot) {
+      return this.getRepo(repoRoot)?.diffMode || this.defaultDiffMode;
+    }
+    return this.getPrimaryRepo()?.diffMode || this.defaultDiffMode;
   }
 
   public getViewMode(): ViewMode {
     return this.viewMode;
   }
 
-  public setBaseBranch(branch: string): void {
-    this.baseBranch = branch;
-    this.refresh();
+  public async setBaseBranch(repoRoot: string, branch: string): Promise<void> {
+    const repo = this.getRepo(repoRoot);
+    if (repo) {
+      repo.baseBranch = branch;
+      await this.loadDiffForRepo(repo.repoRoot);
+      this.updateTreeViewMetadata();
+      this._onDidChangeTreeData.fire();
+    }
   }
 
-  public setDiffMode(mode: DiffMode): void {
-    this.diffMode = mode;
-    this.refresh();
+  public setDiffMode(mode: DiffMode, repoRoot?: string): void {
+    if (repoRoot) {
+      const repo = this.getRepo(repoRoot);
+      if (repo) {
+        repo.diffMode = mode;
+      }
+    } else {
+      this.defaultDiffMode = mode;
+      for (const repo of this.repos.values()) {
+        repo.diffMode = mode;
+      }
+    }
+    this.refresh(repoRoot);
   }
 
   public toggleViewMode(): void {
@@ -175,130 +270,231 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
     this._onDidChangeTreeData.fire();
   }
 
-  public getChangedFiles(): FileDiff[] {
-    return this.changedFiles;
+  public getChangedFiles(repoRoot?: string): FileDiff[] {
+    if (repoRoot) {
+      return this.getRepo(repoRoot)?.changedFiles || [];
+    }
+    const all: FileDiff[] = [];
+    for (const r of this.repos.values()) {
+      all.push(...r.changedFiles);
+    }
+    return all;
   }
 
-  public getFileDiff(relPath: string): FileDiff | undefined {
+  public getFileDiff(relPath: string, repoRoot?: string): FileDiff | undefined {
     const norm = relPath.replace(/\\/g, '/');
-    return this.changedFiles.find(
-      (f) => f.relPath === norm || (f.oldRelPath && f.oldRelPath === norm)
-    );
+    if (repoRoot) {
+      return this.getRepo(repoRoot)?.changedFiles.find(
+        (f) => f.relPath === norm || (f.oldRelPath && f.oldRelPath === norm)
+      );
+    }
+    for (const r of this.repos.values()) {
+      const found = r.changedFiles.find(
+        (f) => f.relPath === norm || (f.oldRelPath && f.oldRelPath === norm)
+      );
+      if (found) return found;
+    }
+    return undefined;
   }
 
-  public async getComparisonRef(): Promise<string> {
-    if (!this.repoRoot || !this.baseBranch) {
+  public async getComparisonRef(repoRoot?: string): Promise<string> {
+    const repo = repoRoot ? this.getRepo(repoRoot) : this.getPrimaryRepo();
+    if (!repo || !repo.baseBranch) {
       return '';
     }
-    if (this.diffMode === 'mergeBase') {
-      const mergeBase = await GitService.getMergeBase(this.repoRoot, this.baseBranch, 'HEAD');
+    if (repo.diffMode === 'mergeBase') {
+      const mergeBase = await GitService.getMergeBase(repo.repoRoot, repo.baseBranch, 'HEAD');
       if (mergeBase) {
         return mergeBase;
       }
     }
-    return this.baseBranch;
+    return repo.baseBranch;
   }
 
-  public async initialize(): Promise<void> {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-      this.repoRoot = null;
-      this._onDidChangeTreeData.fire();
-      return;
+  private getRepoDisplayName(repoRoot: string): string {
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    const normRepo = GitService.normalizePath(repoRoot);
+
+    for (const wf of workspaceFolders) {
+      const normWf = GitService.normalizePath(wf.uri.fsPath);
+      if (normRepo.toLowerCase() === normWf.toLowerCase()) {
+        return wf.name;
+      }
+      if (normRepo.toLowerCase().startsWith(normWf.toLowerCase() + path.sep.toLowerCase())) {
+        const rel = path.relative(normWf, normRepo).replace(/\\/g, '/');
+        return `${wf.name}/${rel}`;
+      }
+    }
+    return path.basename(repoRoot);
+  }
+
+  private async detectBaseBranch(repoRoot: string, currentBranch: string): Promise<string> {
+    const config = vscode.workspace.getConfiguration('branchDiff');
+    const configuredDefault = config.get<string>('defaultBaseBranch')?.trim();
+
+    if (configuredDefault && (await GitService.refExists(repoRoot, configuredDefault))) {
+      return configuredDefault;
     }
 
-    const rootPath = workspaceFolders[0].uri.fsPath;
-    this.repoRoot = await GitService.findRepoRoot(rootPath);
-    if (!this.repoRoot) {
-      this._onDidChangeTreeData.fire();
-      return;
-    }
-
-    this.currentBranch = await GitService.getCurrentBranch(this.repoRoot);
-
-    // Auto-detect base branch if none set
-    if (!this.baseBranch) {
-      const config = vscode.workspace.getConfiguration('branchDiff');
-      const configuredDefault = config.get<string>('defaultBaseBranch')?.trim();
-
-      if (configuredDefault && (await GitService.refExists(this.repoRoot, configuredDefault))) {
-        this.baseBranch = configuredDefault;
-      } else {
-        // Try common base branches
-        const candidateBases = ['main', 'master', 'origin/main', 'origin/master', 'develop'];
-        for (const candidate of candidateBases) {
-          if (candidate !== this.currentBranch && (await GitService.refExists(this.repoRoot, candidate))) {
-            this.baseBranch = candidate;
-            break;
-          }
-        }
-
-        // If none found, pick the first other branch if available
-        if (!this.baseBranch) {
-          const allBranches = await GitService.getBranches(this.repoRoot);
-          const other = allBranches.find((b) => b.name !== this.currentBranch && !b.isCurrent);
-          if (other) {
-            this.baseBranch = other.name;
-          }
-        }
+    const candidateBases = ['main', 'master', 'origin/main', 'origin/master', 'develop'];
+    for (const candidate of candidateBases) {
+      if (candidate !== currentBranch && (await GitService.refExists(repoRoot, candidate))) {
+        return candidate;
       }
     }
 
-    await this.loadDiff();
+    const allBranches = await GitService.getBranches(repoRoot);
+    const other = allBranches.find((b) => b.name !== currentBranch && !b.isCurrent);
+    return other ? other.name : '';
   }
 
-  public async refresh(): Promise<void> {
-    if (!this.repoRoot) {
+  public async initialize(knownRoots: string[] = []): Promise<void> {
+    if (this.isInitializing) return;
+    this.isInitializing = true;
+
+    try {
+      const workspaceFolders = vscode.workspace.workspaceFolders || [];
+      if (workspaceFolders.length === 0 && knownRoots.length === 0) {
+        this.repos.clear();
+        this.updateTreeViewMetadata();
+        this._onDidChangeTreeData.fire();
+        return;
+      }
+
+      const wsRoots = workspaceFolders.map((w) => w.uri.fsPath);
+      const discoveredRoots = await GitService.findRepositories(wsRoots, knownRoots);
+
+      const newRepos = new Map<string, RepoState>();
+
+      for (const root of discoveredRoots) {
+        const normRoot = GitService.normalizePath(root);
+        const existing = this.repos.get(normRoot);
+
+        const currentBranch = await GitService.getCurrentBranch(normRoot);
+        let baseBranch = existing?.baseBranch || '';
+        if (!baseBranch || !(await GitService.refExists(normRoot, baseBranch))) {
+          baseBranch = await this.detectBaseBranch(normRoot, currentBranch);
+        }
+
+        const diffMode = existing?.diffMode || this.defaultDiffMode;
+        const displayName = this.getRepoDisplayName(normRoot);
+
+        newRepos.set(normRoot, {
+          repoRoot: normRoot,
+          displayName,
+          currentBranch,
+          baseBranch,
+          diffMode,
+          changedFiles: existing?.changedFiles || [],
+          isLoading: false
+        });
+      }
+
+      this.repos = newRepos;
+      await this.loadAllDiffs();
+    } finally {
+      this.isInitializing = false;
+      this.updateTreeViewMetadata();
+      this._onDidChangeTreeData.fire();
+    }
+  }
+
+  public async refresh(targetRepoRoot?: string): Promise<void> {
+    if (this.repos.size === 0) {
       await this.initialize();
       return;
     }
 
-    this.currentBranch = await GitService.getCurrentBranch(this.repoRoot);
-    await this.loadDiff();
+    if (targetRepoRoot) {
+      const norm = GitService.normalizePath(targetRepoRoot);
+      const repo = this.repos.get(norm);
+      if (repo) {
+        repo.currentBranch = await GitService.getCurrentBranch(norm);
+        await this.loadDiffForRepo(norm);
+      }
+    } else {
+      for (const repo of this.repos.values()) {
+        repo.currentBranch = await GitService.getCurrentBranch(repo.repoRoot);
+      }
+      await this.loadAllDiffs();
+    }
+
+    this.updateTreeViewMetadata();
+    this._onDidChangeTreeData.fire();
   }
 
-  private async loadDiff(): Promise<void> {
-    if (!this.repoRoot || !this.baseBranch) {
-      this.changedFiles = [];
-      this.updateTreeViewMetadata(0);
-      this._onDidChangeTreeData.fire();
+  public async loadDiffForRepo(repoRoot: string): Promise<void> {
+    const repo = this.repos.get(GitService.normalizePath(repoRoot));
+    if (!repo) return;
+
+    if (!repo.baseBranch) {
+      repo.changedFiles = [];
       return;
     }
 
-    if (this.isLoading) {
-      return;
-    }
-
-    this.isLoading = true;
+    repo.isLoading = true;
     try {
-      this.changedFiles = await GitService.getDiffFiles(
-        this.repoRoot,
-        this.baseBranch,
-        this.diffMode
+      const allRoots = Array.from(this.repos.keys());
+      const nestedInside = allRoots.filter(
+        (r) =>
+          r !== repo.repoRoot &&
+          r.toLowerCase().startsWith(repo.repoRoot.toLowerCase() + path.sep.toLowerCase())
       );
-      this.updateTreeViewMetadata(this.changedFiles.length);
-    } catch (err) {
-      console.error('Failed to load diff files:', err);
-      this.changedFiles = [];
-      this.updateTreeViewMetadata(0);
+
+      repo.changedFiles = await GitService.getDiffFiles(
+        repo.repoRoot,
+        repo.baseBranch,
+        repo.diffMode,
+        nestedInside
+      );
+    } catch (err: any) {
+      console.error(`Failed to load diff files for ${repo.displayName}:`, err);
+      repo.changedFiles = [];
+      repo.error = err?.message || String(err);
     } finally {
-      this.isLoading = false;
-      this._onDidChangeTreeData.fire();
+      repo.isLoading = false;
     }
   }
 
-  private updateTreeViewMetadata(filesCount: number): void {
+  public async loadAllDiffs(): Promise<void> {
+    const roots = Array.from(this.repos.keys());
+    await Promise.all(roots.map((r) => this.loadDiffForRepo(r)));
+  }
+
+  private updateTreeViewMetadata(): void {
     if (!this.treeView) return;
 
-    if (!this.baseBranch) {
-      this.treeView.description = 'Select a base branch';
+    if (this.repos.size === 0) {
+      this.treeView.description = 'No repository';
       this.treeView.badge = undefined;
       return;
     }
 
-    const modeTag = this.diffMode === 'mergeBase' ? 'PR' : 'Direct';
-    this.treeView.description = `${this.baseBranch} ⟵ ${this.currentBranch} [${modeTag}]`;
-    this.treeView.badge = filesCount > 0 ? { value: filesCount, tooltip: `${filesCount} changed files` } : undefined;
+    if (this.repos.size === 1) {
+      const repo = this.getPrimaryRepo()!;
+      if (!repo.baseBranch) {
+        this.treeView.description = 'Select a base branch';
+        this.treeView.badge = undefined;
+        return;
+      }
+
+      const modeTag = repo.diffMode === 'mergeBase' ? 'PR' : 'Direct';
+      this.treeView.description = `${repo.baseBranch} ⟵ ${repo.currentBranch} [${modeTag}]`;
+      const count = repo.changedFiles.length;
+      this.treeView.badge =
+        count > 0 ? { value: count, tooltip: `${count} changed files` } : undefined;
+      return;
+    }
+
+    const totalFiles = Array.from(this.repos.values()).reduce(
+      (sum, r) => sum + r.changedFiles.length,
+      0
+    );
+    this.treeView.description = `${this.repos.size} repos (${totalFiles} changed files)`;
+    this.treeView.badge =
+      totalFiles > 0
+        ? { value: totalFiles, tooltip: `${totalFiles} changed files across ${this.repos.size} repositories` }
+        : undefined;
   }
 
   getTreeItem(element: TreeElement): vscode.TreeItem {
@@ -306,20 +502,9 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
   }
 
   async getChildren(element?: TreeElement): Promise<TreeElement[]> {
-    if (!this.repoRoot) {
+    if (this.repos.size === 0) {
       return [
         new MessageItem('No Git repository detected in workspace', undefined, undefined, 'warning')
-      ];
-    }
-
-    if (!this.baseBranch) {
-      return [
-        new MessageItem(
-          'Click to select a base branch to compare...',
-          'branchDiff.selectBaseBranch',
-          'Select Base Branch',
-          'git-branch'
-        )
       ];
     }
 
@@ -327,82 +512,102 @@ export class ChangedFilesTreeProvider implements vscode.TreeDataProvider<TreeEle
       return element.children;
     }
 
+    // Single repository layout (direct view)
+    if (this.repos.size === 1) {
+      return element ? [] : this.getRepoChildren(this.getPrimaryRepo()!);
+    }
+
+    // Multiple repositories layout: top level lists all repos
     if (!element) {
-      const items: TreeElement[] = [];
+      return Array.from(this.repos.values()).map((repo) => new RepositoryTreeItem(repo));
+    }
 
-      // Summary Header Item
-      let totalIns = 0;
-      let totalDel = 0;
-      for (const f of this.changedFiles) {
-        totalIns += f.insertions;
-        totalDel += f.deletions;
-      }
-
-      items.push(
-        new SummaryItem(
-          this.currentBranch,
-          this.baseBranch,
-          this.diffMode,
-          this.changedFiles.length,
-          totalIns,
-          totalDel
-        )
-      );
-
-      if (this.changedFiles.length === 0) {
-        items.push(
-          new MessageItem(
-            `No changes between ${this.currentBranch} and ${this.baseBranch}`,
-            undefined,
-            undefined,
-            'check'
-          )
-        );
-        return items;
-      }
-
-      if (this.viewMode === 'flat') {
-        for (const file of this.changedFiles) {
-          items.push(new ChangedFileItem(file, this.repoRoot, this.baseBranch, 'flat'));
-        }
-        return items;
-      }
-
-      // Build hierarchical folder tree
-      const rootDir = new DirectoryItem('', '');
-      for (const file of this.changedFiles) {
-        this.addFileToTree(rootDir, file);
-      }
-
-      items.push(...rootDir.children);
-      return items;
+    // Children of a specific repository item
+    if (element instanceof RepositoryTreeItem) {
+      return this.getRepoChildren(element.repoState);
     }
 
     return [];
   }
 
-  private addFileToTree(rootDir: DirectoryItem, file: FileDiff): void {
-    if (!this.repoRoot) return;
+  private getRepoChildren(repo: RepoState): TreeElement[] {
+    const totalIns = repo.changedFiles.reduce((acc, f) => acc + f.insertions, 0);
+    const totalDel = repo.changedFiles.reduce((acc, f) => acc + f.deletions, 0);
 
-    const parts = file.relPath.split('/');
-    let currentDir = rootDir;
+    const items: TreeElement[] = [
+      new SummaryItem(
+        repo.currentBranch,
+        repo.baseBranch,
+        repo.diffMode,
+        repo.changedFiles.length,
+        totalIns,
+        totalDel,
+        repo.repoRoot
+      )
+    ];
 
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      let subDir = currentDir.children.find(
-        (c): c is DirectoryItem => c instanceof DirectoryItem && c.dirName === part
+    if (!repo.baseBranch) {
+      items.push(
+        new MessageItem(
+          'Click to select a base branch...',
+          'branchDiff.selectBaseBranch',
+          'Select Base Branch',
+          'git-branch',
+          [repo.repoRoot]
+        )
       );
-
-      if (!subDir) {
-        const fullSubDirPath = path.posix.join(currentDir.fullPath, part);
-        subDir = new DirectoryItem(part, fullSubDirPath);
-        currentDir.children.push(subDir);
-      }
-      currentDir = subDir;
+      return items;
     }
 
-    currentDir.children.push(
-      new ChangedFileItem(file, this.repoRoot, this.baseBranch, 'tree')
-    );
+    if (repo.changedFiles.length === 0) {
+      items.push(
+        new MessageItem(
+          `No changes between ${repo.currentBranch} and ${repo.baseBranch}`,
+          undefined,
+          undefined,
+          'check'
+        )
+      );
+      return items;
+    }
+
+    items.push(...this.addFilesToTree(repo.changedFiles, repo.repoRoot, repo.baseBranch));
+    return items;
+  }
+
+  private addFilesToTree(
+    files: FileDiff[],
+    repoRoot: string,
+    baseBranch: string
+  ): TreeElement[] {
+    if (this.viewMode === 'flat') {
+      return files.map((file) => new ChangedFileItem(file, repoRoot, baseBranch, 'flat'));
+    }
+
+    const rootDir = new DirectoryItem('', '');
+    for (const file of files) {
+      const parts = file.relPath.split('/');
+      let currentDir = rootDir;
+
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        let subDir = currentDir.children.find(
+          (c): c is DirectoryItem => c instanceof DirectoryItem && c.dirName === part
+        );
+
+        if (!subDir) {
+          const fullSubDirPath = path.posix.join(currentDir.fullPath, part);
+          subDir = new DirectoryItem(part, fullSubDirPath);
+          currentDir.children.push(subDir);
+        }
+        currentDir = subDir;
+      }
+
+      currentDir.children.push(
+        new ChangedFileItem(file, repoRoot, baseBranch, 'tree')
+      );
+    }
+
+    return rootDir.children;
   }
 }

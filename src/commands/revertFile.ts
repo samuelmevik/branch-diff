@@ -8,41 +8,23 @@ export async function revertFileChanges(
   item: ChangedFileItem | vscode.Uri | undefined,
   treeProvider: ChangedFilesTreeProvider
 ): Promise<void> {
-  const repoRoot = treeProvider.getRepoRoot();
-  const baseBranch = treeProvider.getBaseBranch();
-
-  if (!repoRoot || !baseBranch) {
-    vscode.window.showWarningMessage('Please select a base branch first.');
-    return;
-  }
-
+  let repoRoot: string | undefined;
   let fileDiff: FileDiff | undefined;
 
   if (item instanceof ChangedFileItem) {
+    repoRoot = item.repoRoot;
     fileDiff = item.fileDiff;
-  } else if (item instanceof vscode.Uri) {
-    const rel = path.relative(repoRoot, item.fsPath).replace(/\\/g, '/');
-    fileDiff = treeProvider.getFileDiff(rel);
-    if (!fileDiff) {
-      fileDiff = {
-        relPath: rel,
-        status: 'M',
-        insertions: 0,
-        deletions: 0,
-        isBinary: false
-      };
-    }
   } else {
-    // If invoked without arguments (e.g. from Command Palette), check active editor
-    const activeEditor = vscode.window.activeTextEditor;
-    if (!activeEditor) {
+    const targetUri = item instanceof vscode.Uri ? item : vscode.window.activeTextEditor?.document.uri;
+    if (!targetUri) {
       vscode.window.showInformationMessage('No active file selected to revert.');
       return;
     }
-    const rel = path.relative(repoRoot, activeEditor.document.uri.fsPath).replace(/\\/g, '/');
-    fileDiff = treeProvider.getFileDiff(rel);
-    if (!fileDiff) {
-      fileDiff = {
+    const repo = treeProvider.getRepoForPath(targetUri.fsPath);
+    if (repo) {
+      repoRoot = repo.repoRoot;
+      const rel = path.relative(repoRoot, targetUri.fsPath).replace(/\\/g, '/');
+      fileDiff = treeProvider.getFileDiff(rel, repoRoot) || {
         relPath: rel,
         status: 'M',
         insertions: 0,
@@ -50,6 +32,19 @@ export async function revertFileChanges(
         isBinary: false
       };
     }
+  }
+
+  if (!repoRoot || !fileDiff) {
+    vscode.window.showWarningMessage('Unable to identify file and repository to revert.');
+    return;
+  }
+
+  const repo = treeProvider.getRepo(repoRoot);
+  const baseBranch = repo?.baseBranch;
+
+  if (!baseBranch) {
+    vscode.window.showWarningMessage('Please select a base branch first.');
+    return;
   }
 
   const filename = path.posix.basename(fileDiff.relPath);
@@ -102,7 +97,7 @@ export async function revertFileChanges(
     console.debug('Error closing tabs for reverted file:', err);
   }
 
-  const comparisonRef = await treeProvider.getComparisonRef();
+  const comparisonRef = await treeProvider.getComparisonRef(repoRoot);
   if (!comparisonRef) {
     vscode.window.showErrorMessage('Unable to determine base reference for comparison.');
     return;
@@ -110,7 +105,7 @@ export async function revertFileChanges(
 
   try {
     await GitService.revertFile(repoRoot, comparisonRef, fileDiff);
-    await treeProvider.refresh();
+    await treeProvider.refresh(repoRoot);
     vscode.window.setStatusBarMessage(`$(check) Reverted all changes to ${filename}`, 3500);
   } catch (err: any) {
     vscode.window.showErrorMessage(`Failed to revert "${filename}": ${err?.message || err}`);

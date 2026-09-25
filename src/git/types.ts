@@ -23,3 +23,14 @@ export interface DiffSummary {
   insertions: number;
   deletions: number;
 }
+
+export interface RepoState {
+  repoRoot: string;
+  displayName: string;
+  currentBranch: string;
+  baseBranch: string;
+  diffMode: DiffMode;
+  changedFiles: FileDiff[];
+  isLoading: boolean;
+  error?: string;
+}

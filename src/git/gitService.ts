@@ -54,6 +54,40 @@ export class GitService {
     });
   }
 
+  public static normalizePath(p: string): string {
+    let norm = path.normalize(p);
+    if (process.platform === 'win32' && norm.length >= 2 && norm[1] === ':') {
+      norm = norm[0].toLowerCase() + norm.slice(1);
+    }
+    if (norm.length > 3 && (norm.endsWith('/') || norm.endsWith('\\'))) {
+      norm = norm.slice(0, -1);
+    }
+    return norm;
+  }
+
+  private static readonly IGNORED_DIRS = new Set([
+    'node_modules',
+    '.git',
+    '.hg',
+    '.svn',
+    '.vscode',
+    '.idea',
+    'dist',
+    'out',
+    'build',
+    'target',
+    'vendor',
+    '.cache',
+    '.next',
+    '.nuxt',
+    'coverage',
+    '.turbo',
+    '.venv',
+    'env',
+    'venv',
+    '__pycache__'
+  ]);
+
   /**
    * Finds the root of the git repository for a given directory.
    */
@@ -61,10 +95,133 @@ export class GitService {
     try {
       const output = await this.exec(['rev-parse', '--show-toplevel'], dir);
       const trimmed = output.trim();
-      return trimmed ? path.normalize(trimmed) : null;
+      return trimmed ? this.normalizePath(trimmed) : null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Discovers submodule paths registered in .gitmodules
+   */
+  public static async getSubmodulePaths(repoRoot: string): Promise<string[]> {
+    const gitmodulesFile = path.join(repoRoot, '.gitmodules');
+    if (!fs.existsSync(gitmodulesFile)) {
+      return [];
+    }
+
+    const submodules: string[] = [];
+    try {
+      const output = await this.exec(
+        ['config', '--file', '.gitmodules', '--get-regexp', 'path'],
+        repoRoot
+      );
+      const lines = output.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          const subRelPath = parts[1];
+          const subAbsPath = this.normalizePath(path.join(repoRoot, subRelPath));
+          if (fs.existsSync(subAbsPath)) {
+            submodules.push(subAbsPath);
+          }
+        }
+      }
+    } catch {
+      // Ignore git config errors
+    }
+    return submodules;
+  }
+
+  /**
+   * Scans a directory recursively for Git repositories (.git folders or .git files for submodules/worktrees)
+   */
+  private static async scanDirectoryForGitRepos(
+    currentDir: string,
+    depth: number,
+    maxDepth: number,
+    discovered: Set<string>
+  ): Promise<void> {
+    if (depth >= maxDepth) return;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    // Check if this directory itself contains a .git entry
+    const hasGit = entries.some(
+      (e) => e.name === '.git' && (e.isDirectory() || e.isFile())
+    );
+
+    if (hasGit) {
+      const root = await this.findRepoRoot(currentDir);
+      if (root) {
+        discovered.add(this.normalizePath(root));
+      }
+    }
+
+    // Recurse into subdirectories
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (this.IGNORED_DIRS.has(entry.name)) {
+          continue;
+        }
+        const subDirPath = path.join(currentDir, entry.name);
+        await this.scanDirectoryForGitRepos(subDirPath, depth + 1, maxDepth, discovered);
+      }
+    }
+  }
+
+  /**
+   * Discovers all git repositories inside workspace roots and any explicitly provided known roots.
+   */
+  public static async findRepositories(
+    workspaceRoots: string[],
+    knownRoots: string[] = [],
+    maxDepth: number = 4
+  ): Promise<string[]> {
+    const discovered = new Set<string>();
+
+    const addIfRepo = async (dir: string) => {
+      const norm = this.normalizePath(dir);
+      if (discovered.has(norm)) return;
+      const root = await this.findRepoRoot(dir);
+      if (root) {
+        discovered.add(this.normalizePath(root));
+      }
+    };
+
+    // 1. Add known roots (e.g. from VS Code git extension)
+    for (const kr of knownRoots) {
+      await addIfRepo(kr);
+    }
+
+    // 2. Scan workspace roots
+    for (const wsRoot of workspaceRoots) {
+      if (!fs.existsSync(wsRoot)) continue;
+      await addIfRepo(wsRoot);
+      await this.scanDirectoryForGitRepos(wsRoot, 0, maxDepth, discovered);
+    }
+
+    // 3. For all discovered repos, check submodules
+    const currentList = Array.from(discovered);
+    for (const repoRoot of currentList) {
+      const submodules = await this.getSubmodulePaths(repoRoot);
+      for (const sm of submodules) {
+        await addIfRepo(sm);
+      }
+    }
+
+    // Sort: shorter paths first (parents before children), then alphabetical
+    return Array.from(discovered).sort((a, b) => {
+      const depthA = a.split(/[/\\]/).length;
+      const depthB = b.split(/[/\\]/).length;
+      if (depthA !== depthB) return depthA - depthB;
+      return a.localeCompare(b);
+    });
   }
 
   /**
@@ -147,7 +304,8 @@ export class GitService {
   public static async getDiffFiles(
     repoRoot: string,
     baseBranch: string,
-    mode: DiffMode
+    mode: DiffMode,
+    nestedRepoPaths: string[] = []
   ): Promise<FileDiff[]> {
     let comparisonRef = baseBranch;
 
@@ -157,6 +315,23 @@ export class GitService {
         comparisonRef = mergeBase;
       }
     }
+
+    // Convert nested repo paths to relative paths inside repoRoot
+    const normalizedRepoRoot = this.normalizePath(repoRoot);
+    const nestedRels = nestedRepoPaths
+      .map((np) => {
+        const norm = this.normalizePath(np);
+        if (norm.toLowerCase().startsWith(normalizedRepoRoot.toLowerCase())) {
+          return path.relative(normalizedRepoRoot, norm).replace(/\\/g, '/').replace(/\/+$/, '');
+        }
+        return '';
+      })
+      .filter((r) => r.length > 0 && !r.startsWith('..'));
+
+    const isInsideNestedRepo = (rel: string) => {
+      const clean = rel.replace(/\/+$/, '');
+      return nestedRels.some((nr) => clean === nr || clean.startsWith(nr + '/'));
+    };
 
     // 1. Get name-status with rename detection (-M)
     // Comparing comparisonRef to working tree (no second ref means working tree)
@@ -215,6 +390,10 @@ export class GitService {
         relPath = parts[1].replace(/\\/g, '/');
       }
 
+      if (isInsideNestedRepo(relPath)) {
+        continue;
+      }
+
       // Find matching stats
       const stats = statMap.get(relPath) ||
         (oldRelPath ? statMap.get(`${oldRelPath} => ${relPath}`) : undefined) ||
@@ -239,6 +418,9 @@ export class GitService {
       const untrackedLines = untrackedOutput.split(/\r?\n/).filter((l) => l.trim().length > 0);
       for (const rawPath of untrackedLines) {
         const normPath = rawPath.replace(/\\/g, '/');
+        if (isInsideNestedRepo(normPath)) {
+          continue;
+        }
         if (!files.some((f) => f.relPath === normPath)) {
           files.push({
             relPath: normPath,
@@ -352,4 +534,12 @@ export class GitService {
       }
     }
   }
+
+  /**
+   * Checks out a branch or ref in the given repository.
+   */
+  public static async checkout(repoRoot: string, branchName: string): Promise<string> {
+    return await this.exec(['checkout', branchName], repoRoot);
+  }
 }
+
