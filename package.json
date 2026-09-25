@@ -2,7 +2,7 @@
   "name": "branch-diff-review",
   "displayName": "Branch Diff & PR Review",
   "description": "Compare your current working branch against any branch (like a GitHub PR) with a changed files view and an editable diff editor.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Stenen",
   "license": "MIT",
   "icon": "icon.png",
